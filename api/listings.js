@@ -73,11 +73,22 @@ async function search(token, query, category) {
   return out;
 }
 
+async function snapshot(req) {
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  const proto = req.headers['x-forwarded-proto'] || 'https';
+  if (!host) return null;
+  const res = await fetch(`${proto}://${host}/listings.json`);
+  if (!res.ok) return null;
+  const body = await res.json();
+  if (!body.items || !body.items.length) return null;
+  return body;
+}
+
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS');
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
-  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method === 'OPTIONS' || req.method === 'HEAD') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
@@ -93,18 +104,18 @@ module.exports = async (req, res) => {
         items.push(row);
       }
     }
-    if (!items.length) {
-      return res.status(502).json({
-        error: 'Unable to load listings. Check API endpoint configuration.',
-        items: []
-      });
-    }
-    return res.status(200).json({ count: items.length, items });
-  } catch (err) {
-    const status = err.status || 500;
-    return res.status(status).json({
-      error: 'Unable to load listings. Check API endpoint configuration.',
-      items: []
-    });
+    if (items.length) return res.status(200).json({ count: items.length, items, source: 'ebay' });
+  } catch (_) {
+    // fall through to snapshot
   }
+
+  try {
+    const snap = await snapshot(req);
+    if (snap) return res.status(200).json({ ...snap, source: 'snapshot' });
+  } catch (_) {}
+
+  return res.status(502).json({
+    error: 'Unable to load listings. Check API endpoint configuration.',
+    items: []
+  });
 };
