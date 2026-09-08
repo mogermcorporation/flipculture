@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Flipculture | Inventory pipeline</title>
+  <meta name="description" content="Flipculture curated inventory scraper. Listings sync on a 6-hour GitHub Actions schedule." />
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      background: #0b1020;
+      color: #e8eefc;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    main {
+      max-width: 640px;
+      width: 100%;
+      background: #141a2f;
+      border: 1px solid #2a355c;
+      border-radius: 16px;
+      padding: 32px;
+    }
+    h1 { margin: 0 0 8px; font-size: 1.75rem; }
+    p { color: #b7c2e0; line-height: 1.5; }
+    .ok { display: inline-block; background: #12351f; color: #7dffb1; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+    a { color: #8cb4ff; }
+  </style>
+</head>
+<body>
+  <main>
+    <span class="ok">PIPELINE LIVE</span>
+    <h1>Flipculture</h1>
+    <p>This Vercel host is the public status page for the Flipculture inventory scraper. Product records are collected from public listings every 6 hours via GitHub Actions and written to Supabase — there is no storefront on this domain yet.</p>
+    <p><a href="https://github.com/mogermcorporation/flipculture">Source repository</a></p>
+  </main>
+</body>
+</html>
