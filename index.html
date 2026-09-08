@@ -3,40 +3,79 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Flipculture | Inventory pipeline</title>
-  <meta name="description" content="Flipculture curated inventory scraper. Listings sync on a 6-hour GitHub Actions schedule." />
+  <title>Flipculture | Live eBay listings</title>
+  <meta name="description" content="Curated eBay inventory for sneakers, tech, and luxury watches." />
   <style>
-    :root { color-scheme: dark; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-      background: #0b1020;
-      color: #e8eefc;
-      display: grid;
-      place-items: center;
-      padding: 24px;
-    }
-    main {
-      max-width: 640px;
-      width: 100%;
-      background: #141a2f;
-      border: 1px solid #2a355c;
-      border-radius: 16px;
-      padding: 32px;
-    }
-    h1 { margin: 0 0 8px; font-size: 1.75rem; }
-    p { color: #b7c2e0; line-height: 1.5; }
-    .ok { display: inline-block; background: #12351f; color: #7dffb1; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
-    a { color: #8cb4ff; }
+    :root { color-scheme: dark; --bg:#0b1020; --card:#141a2f; --line:#2a355c; --text:#e8eefc; --muted:#b7c2e0; --accent:#8cb4ff; --ok:#7dffb1; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:28px 20px 8px; max-width:1100px; margin:0 auto; }
+    .ok { display:inline-block; background:#12351f; color:var(--ok); border-radius:999px; padding:4px 10px; font-size:12px; font-weight:700; letter-spacing:.04em; }
+    h1 { margin:10px 0 6px; font-size:2rem; }
+    .sub { color:var(--muted); margin:0 0 18px; }
+    .err { max-width:1100px; margin:0 auto 16px; padding:14px 16px; border:1px solid #5a2a2a; background:#2a1418; border-radius:12px; color:#ffd0d0; }
+    .grid { max-width:1100px; margin:0 auto; padding:0 20px 48px; display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; }
+    article { background:var(--card); border:1px solid var(--line); border-radius:16px; overflow:hidden; display:flex; flex-direction:column; }
+    article img { width:100%; height:180px; object-fit:cover; background:#0e1430; }
+    .body { padding:14px; display:flex; flex-direction:column; gap:8px; flex:1; }
+    .cat { font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); }
+    .title { font-size:14px; line-height:1.35; margin:0; min-height:2.7em; }
+    .price { font-weight:800; }
+    .was { color:var(--muted); text-decoration:line-through; font-weight:500; margin-left:8px; }
+    a.btn { margin-top:auto; display:inline-block; text-align:center; text-decoration:none; color:#081018; background:var(--accent); border-radius:10px; padding:8px 10px; font-weight:700; font-size:13px; }
   </style>
 </head>
 <body>
-  <main>
-    <span class="ok">PIPELINE LIVE</span>
+  <header>
+    <span class="ok" id="badge">LOADING</span>
     <h1>Flipculture</h1>
-    <p>This Vercel host is the public status page for the Flipculture inventory scraper. Product records are collected from public listings every 6 hours via GitHub Actions and written to Supabase — there is no storefront on this domain yet.</p>
-    <p><a href="https://github.com/mogermcorporation/flipculture">Source repository</a></p>
-  </main>
+    <p class="sub">Live eBay listings for sneakers, gaming laptops, and watches.</p>
+  </header>
+  <div id="error" class="err" hidden></div>
+  <section class="grid" id="grid"></section>
+  <script>
+    const esc = (s) => String(s || '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const money = (n, c) => new Intl.NumberFormat('en-US', { style: 'currency', currency: c || 'USD' }).format(n);
+    const showError = (msg) => {
+      const el = document.getElementById('error');
+      el.hidden = false;
+      el.textContent = msg;
+      document.getElementById('badge').textContent = 'API ERROR';
+    };
+    const render = (items) => {
+      const grid = document.getElementById('grid');
+      grid.innerHTML = items.map((item) => `
+        <article>
+          <img src="${esc(item.image_url)}" alt="" />
+          <div class="body">
+            <div class="cat">${esc(item.category || 'ebay')}</div>
+            <p class="title">${esc(item.title)}</p>
+            <div><span class="price">${money(item.sale_price, item.currency)}</span><span class="was">${money(item.original_price, item.currency)}</span></div>
+            <a class="btn" href="${esc(item.affiliate_url)}" target="_blank" rel="noopener noreferrer">View on eBay</a>
+          </div>
+        </article>
+      `).join('');
+      document.getElementById('badge').textContent = items.length + ' LIVE LISTINGS';
+    };
+    async function load() {
+      const fallbackMsg = 'Unable to load listings. Check API endpoint configuration.';
+      try {
+        const live = await fetch('/api/listings', { headers: { 'Accept': 'application/json' } });
+        if (live.ok) {
+          const data = await live.json();
+          if (data.items && data.items.length) return render(data.items);
+        }
+      } catch (_) {}
+      try {
+        const snap = await fetch('/listings.json', { headers: { 'Accept': 'application/json' } });
+        if (snap.ok) {
+          const data = await snap.json();
+          if (data.items && data.items.length) return render(data.items);
+        }
+      } catch (_) {}
+      showError(fallbackMsg);
+    }
+    load();
+  </script>
 </body>
 </html>
