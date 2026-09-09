@@ -1,5 +1,6 @@
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 const SEARCH_URL = 'https://api.ebay.com/buy/browse/v1/item_summary/search';
+const CAMPAIGN_ID = process.env.EBAY_CAMPAIGN_ID || process.env.EBAY_PARTNER_ID || '5339168299';
 const QUERIES = [
   ['Air Jordan 1 Retro High', 'sneakers'],
   ['Nike Dunk Low', 'sneakers'],
@@ -8,6 +9,22 @@ const QUERIES = [
   ['Rolex GMT-Master II', 'luxury'],
   ['Rolex Submariner', 'luxury']
 ];
+
+function affiliateUrl(raw) {
+  if (!raw) return '';
+  try {
+    const u = new URL(raw);
+    if (!/(^|\.)ebay\.(com|ca|co\.uk|de|fr|it|es|com\.au)$/i.test(u.hostname)) return raw;
+    u.searchParams.set('mkcid', '1');
+    u.searchParams.set('mkrid', '711-53200-19255-0');
+    u.searchParams.set('mkevt', '1');
+    u.searchParams.set('campid', CAMPAIGN_ID);
+    u.searchParams.set('toolid', '10001');
+    return u.toString();
+  } catch {
+    return raw;
+  }
+}
 
 async function ebayToken() {
   const id = process.env.EBAY_APP_ID;
@@ -64,7 +81,7 @@ async function search(token, query, category) {
       original_price: Math.round(salePrice * 120) / 100,
       sale_price: salePrice,
       discount_percent: 16.6,
-      affiliate_url: item.itemWebUrl || '',
+      affiliate_url: affiliateUrl(item.itemWebUrl || ''),
       image_url: item.image?.imageUrl || '',
       source_platform: 'ebay',
       currency: item.price?.currency || 'USD'
@@ -81,6 +98,10 @@ async function snapshot(req) {
   if (!res.ok) return null;
   const body = await res.json();
   if (!body.items || !body.items.length) return null;
+  body.items = body.items.map((row) => ({
+    ...row,
+    affiliate_url: affiliateUrl(row.affiliate_url)
+  }));
   return body;
 }
 

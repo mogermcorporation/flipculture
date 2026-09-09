@@ -29,4 +29,6 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           EBAY_APP_ID: ${{ secrets.EBAY_APP_ID }}
           EBAY_CERT_ID: ${{ secrets.EBAY_CERT_ID }}
+          EBAY_CAMPAIGN_ID: ${{ secrets.EBAY_CAMPAIGN_ID }}
+          EBAY_PARTNER_ID: ${{ secrets.EBAY_PARTNER_ID }}
         run: python scraper.py

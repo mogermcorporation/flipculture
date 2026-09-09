@@ -3,6 +3,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 from supabase import create_client
@@ -11,6 +12,7 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 EBAY_APP_ID = os.environ.get("EBAY_APP_ID")
 EBAY_CERT_ID = os.environ.get("EBAY_CERT_ID")
+CAMPAIGN_ID = os.environ.get("EBAY_CAMPAIGN_ID") or os.environ.get("EBAY_PARTNER_ID") or "5339168299"
 MARKETPLACE = os.environ.get("EBAY_MARKETPLACE_ID", "EBAY_US")
 LISTINGS_PATH = Path(__file__).resolve().parent / "listings.json"
 
@@ -22,6 +24,26 @@ QUERIES = [
     ("Rolex GMT-Master II", "luxury"),
     ("Rolex Submariner", "luxury"),
 ]
+
+
+def affiliate_url(raw: str) -> str:
+    if not raw:
+        return ""
+    parts = urlsplit(raw)
+    host = (parts.hostname or "").lower()
+    if "ebay." not in host:
+        return raw
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query.update(
+        {
+            "mkcid": "1",
+            "mkrid": "711-53200-19255-0",
+            "mkevt": "1",
+            "campid": CAMPAIGN_ID,
+            "toolid": "10001",
+        }
+    )
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment))
 
 
 def ebay_app_token() -> str:
@@ -71,7 +93,7 @@ def search_ebay(token: str, query: str, category: str, limit: int = 8) -> list[d
             sale_price = 0.0
         if sale_price <= 0:
             continue
-        url = item.get("itemWebUrl") or ""
+        url = affiliate_url(item.get("itemWebUrl") or "")
         image = (item.get("image") or {}).get("imageUrl") or ""
         records.append(
             {
