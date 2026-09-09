@@ -1,41 +1,9 @@
-const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
-const SEARCH_URL = 'https://api.ebay.com/buy/browse/v1/item_summary/search';
-const CAMPAIGN_ID = process.env.EBAY_CAMPAIGN_ID || process.env.EBAY_PARTNER_ID || '5339168299';
-
-const QUERIES = [
-  ['Air Jordan 1 Retro sneaker', 'sneakers', '15709', true],
-  ['Air Jordan 4 Retro sneaker', 'sneakers', '15709', true],
-  ['Air Jordan 11 Retro sneaker', 'sneakers', '15709', true],
-  ['Nike Kobe Bryant sneaker', 'sneakers', '15709', true],
-  ['Travis Scott Jordan sneaker', 'sneakers', '15709', true],
-  ['Nike Dunk Low', 'sneakers', '15709', true],
-  ['Supreme hoodie', 'streetwear', '1059', false],
-  ['Corteiz hoodie', 'streetwear', '1059', false],
-  ['True Religion jeans', 'streetwear', '1059', false],
-  ['Panini Prizm PSA 10', 'collectibles', '212', true],
-  ['Michael Jordan game used jersey relic', 'collectibles', '64482', false],
-  ['Rolex Submariner watch', 'watches', '31387', true],
-  ['Patek Philippe Nautilus watch', 'watches', '31387', true],
-  ['Omega Speedmaster watch', 'watches', '31387', true]
-];
-
-const ELECTRONICS = /laptop|macbook|steam\s*deck|gpu\b|rtx\s*\d|rog\s*(strix|ally)|victus|battlestation|handheld|nintendo\s*switch/i;
-const SHOP_JACKET = /shop jacket/i;
-const WATCH_PARTS = /bracelet|bezel insert|caseback|clasp|coaster|\bpen\b|teardown|\blink\b/i;
-const SHOE = /sneaker|shoes?|jordan\s*\d|dunk|yeezy|kobe|air force/i;
-const APPAREL = /hoodie|sweatshirt|t-shirt|\btee\b|jeans|denim|jacket/i;
-const CARD = /psa|bgs|panini|topps|bowman|rookie card|game[- ]used|autograph|memorabilia|relic/i;
-const WATCH = /rolex|omega|cartier|tudor|patek|audemars|richard mille|submariner|datejust|daytona|speedmaster|watch/i;
-
-function classify(title, expected) {
-  const t = title || '';
-  if (ELECTRONICS.test(t) || SHOP_JACKET.test(t) || WATCH_PARTS.test(t)) return null;
-  if (WATCH.test(t) && !SHOE.test(t) && !APPAREL.test(t)) return 'watches';
-  if (CARD.test(t) && !SHOE.test(t)) return 'collectibles';
-  if (APPAREL.test(t) && !SHOE.test(t)) return 'streetwear';
-  if (SHOE.test(t)) return 'sneakers';
-  return expected;
-}
+const CAMPAIGN_ID = process.env.EBAY_CAMPAIGN_ID || process.env.EBAY_PARTNER_ID || process.env.EPN_CAMPID || '5339168299';
+const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://zhlkkihvttikuhsjwhcv.supabase.co').replace(/\/$/, '');
+const SUPABASE_ANON =
+  process.env.SUPABASE_ANON_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpobGtraWh2dHRpa3Voc2p3aGN2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODgzNzgxODYsImV4cCI6MjEwMzk1NDE4Nn0.N5xCAjFUbyBawVKF2HhAi-csl4yoeYk91g2HopRyu8A';
+const WALLS = ['sneakers', 'streetwear', 'collectibles', 'watches'];
 
 function affiliateUrl(raw) {
   if (!raw) return '';
@@ -53,75 +21,52 @@ function affiliateUrl(raw) {
   }
 }
 
-async function ebayToken() {
-  const id = process.env.EBAY_APP_ID;
-  const cert = process.env.EBAY_CERT_ID;
-  if (!id || !cert) {
-    const err = new Error('missing_ebay_credentials');
-    err.status = 500;
-    throw err;
-  }
-  const basic = Buffer.from(`${id}:${cert}`).toString('base64');
-  const res = await fetch(TOKEN_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Authorization: `Basic ${basic}`
-    },
-    body: 'grant_type=client_credentials&scope=https://api.ebay.com/oauth/api_scope'
-  });
-  if (!res.ok) {
-    const err = new Error('ebay_token_failed');
-    err.status = 502;
-    throw err;
-  }
-  const body = await res.json();
-  if (!body.access_token) {
-    const err = new Error('ebay_token_failed');
-    err.status = 502;
-    throw err;
-  }
-  return body.access_token;
+function mapRow(row) {
+  const category = String(row.category || '').toLowerCase();
+  if (!WALLS.includes(category)) return null;
+  const sale = Number(row.sale_price || row.price || 0);
+  if (!sale) return null;
+  const orig = Number(row.original_price || row.sold_avg || sale);
+  return {
+    title: row.title,
+    category,
+    item_type: row.item_type || 'physical',
+    original_price: orig,
+    sale_price: sale,
+    discount_percent: row.discount_percent == null ? null : Number(row.discount_percent),
+    affiliate_url: affiliateUrl(row.affiliate_url || ''),
+    image_url: row.image_url || '',
+    source_platform: row.source_platform || 'ebay',
+    currency: row.currency || 'USD',
+    cohort: row.cohort || null,
+    ebay_id: row.ebay_id || null
+  };
 }
 
-async function search(token, query, expected, categoryId, authenticity) {
-  const url = new URL(SEARCH_URL);
-  url.searchParams.set('q', query);
-  url.searchParams.set('limit', '12');
-  const filt = authenticity
-    ? 'qualifiedPrograms:{AUTHENTICITY_GUARANTEE},buyingOptions:{FIXED_PRICE}'
-    : 'buyingOptions:{FIXED_PRICE}';
-  url.searchParams.set('filter', filt);
-  if (categoryId) url.searchParams.set('category_ids', categoryId);
+async function fromInventory() {
+  const select = 'title,category,item_type,original_price,sale_price,discount_percent,affiliate_url,image_url,source_platform,currency,cohort,ebay_id';
+  const url = `${SUPABASE_URL}/rest/v1/inventory?is_active=eq.true&category=in.(${WALLS.join(',')})&select=${select}&order=sale_price.desc&limit=1000`;
   const res = await fetch(url, {
     headers: {
-      Authorization: `Bearer ${token}`,
-      'X-EBAY-C-MARKETPLACE-ID': process.env.EBAY_MARKETPLACE_ID || 'EBAY_US'
+      apikey: SUPABASE_ANON,
+      Authorization: `Bearer ${SUPABASE_ANON}`
     }
   });
-  if (!res.ok) return [];
-  const body = await res.json();
-  const out = [];
-  for (const item of body.itemSummaries || []) {
-    const salePrice = Number(item.price?.value || 0);
-    if (!salePrice) continue;
-    const title = item.title || query;
-    const category = classify(title, expected);
-    if (category !== expected) continue;
-    out.push({
-      title,
-      category,
-      item_type: 'physical',
-      original_price: Math.round(salePrice * 120) / 100,
-      sale_price: salePrice,
-      discount_percent: 16.6,
-      affiliate_url: affiliateUrl(item.itemWebUrl || ''),
-      image_url: item.image?.imageUrl || '',
-      source_platform: 'ebay',
-      currency: item.price?.currency || 'USD'
-    });
+  if (!res.ok) return null;
+  const rows = await res.json();
+  if (!Array.isArray(rows) || !rows.length) return null;
+  const items = [];
+  const seen = new Set();
+  for (const row of rows) {
+    const mapped = mapRow(row);
+    if (!mapped) continue;
+    const key = mapped.ebay_id || mapped.affiliate_url || mapped.title;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    items.push(mapped);
   }
-  return out;
+  if (!items.length) return null;
+  return { count: items.length, items, source: 'inventory' };
 }
 
 async function snapshot(req) {
@@ -133,35 +78,23 @@ async function snapshot(req) {
   const body = await res.json();
   if (!body.items || !body.items.length) return null;
   body.items = body.items
-    .map((row) => ({ ...row, affiliate_url: affiliateUrl(row.affiliate_url) }))
-    .filter((row) => ['sneakers', 'streetwear', 'collectibles', 'watches'].includes(row.category));
+    .map((row) => mapRow(row))
+    .filter(Boolean);
+  body.count = body.items.length;
   return body;
 }
 
 module.exports = async (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS');
-  res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=600');
+  res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=600');
   if (req.method === 'OPTIONS' || req.method === 'HEAD') return res.status(200).end();
   if (req.method !== 'GET') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const token = await ebayToken();
-    const items = [];
-    const seen = new Set();
-    for (const [query, category, categoryId, authenticity] of QUERIES) {
-      const batch = await search(token, query, category, categoryId, authenticity);
-      for (const row of batch) {
-        const key = row.affiliate_url || row.title;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        items.push(row);
-      }
-    }
-    if (items.length) return res.status(200).json({ count: items.length, items, source: 'ebay' });
-  } catch (_) {
-    // fall through to snapshot
-  }
+    const live = await fromInventory();
+    if (live) return res.status(200).json(live);
+  } catch (_) {}
 
   try {
     const snap = await snapshot(req);
