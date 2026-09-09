@@ -57,7 +57,7 @@ function denimBrand(title) {
   if (/\bamiri\b/i.test(t)) return 'Amiri';
   if (/purple\s*brand/i.test(t)) return 'Purple';
   if (/\bdiesel\b/i.test(t)) return 'Diesel';
-  if (/\bace\s*(denim|jeans|selvedge)/i.test(t)) return 'Ace';
+  if (/(?<![a-z])ace\s+(denim|jeans)\b/i.test(t)) return 'Ace';
   if (/\bbig\s*e\b/i.test(t)) return 'Big E';
   if (/levi'?s|\blevis\b|\blvc\b|\blevi\b/i.test(t)) return "Levi's";
   return 'other';
