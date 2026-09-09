@@ -21,12 +21,95 @@ function affiliateUrl(raw) {
   }
 }
 
+function jordanNumber(title) {
+  const t = title || '';
+  const m =
+    t.match(/\bair\s+jordan\s*(1[0-4]|[1-9])\b/i) ||
+    t.match(/\bjordan\s*(1[0-4]|[1-9])\b/i) ||
+    t.match(/\baj\s*-?\s*(1[0-4]|[1-9])\b/i);
+  return m ? m[1] : null;
+}
+
+function sneakerFamily(title) {
+  const t = title || '';
+  if (/travis/i.test(t)) return 'travis';
+  if (/\bkobe\b/i.test(t)) return 'kobe';
+  const n = jordanNumber(t);
+  if (n) return `jordan-${n}`;
+  return 'trending';
+}
+
+function streetwearApparel(title) {
+  const t = title || '';
+  const denimTears = /denim\s*tears/i.test(t);
+  if (/\b(jeans?|denim)\b/i.test(t) && !denimTears) return 'denim';
+  if (denimTears && /\bjeans?\b/i.test(t) && !/\b(hoodie|hooded|sweatshirt)\b/i.test(t)) return 'denim';
+  if (/\b(hoodie|hooded|sweatshirt)\b/i.test(t)) return 'hoodie';
+  if (/\b(t-?shirts?|tees?)\b/i.test(t)) return 'tee';
+  return 'top';
+}
+
+function denimBrand(title) {
+  const t = title || '';
+  if (/gallery\s*dept|gallery\s*department/i.test(t)) return 'Gallery Dept';
+  if (/true\s*religion/i.test(t)) return 'True Religion';
+  if (/\bevisu\b/i.test(t)) return 'Evisu';
+  if (/\bamiri\b/i.test(t)) return 'Amiri';
+  if (/purple\s*brand/i.test(t)) return 'Purple';
+  if (/\bdiesel\b/i.test(t)) return 'Diesel';
+  if (/\bace\s*(denim|jeans|selvedge)/i.test(t)) return 'Ace';
+  if (/\bbig\s*e\b/i.test(t)) return 'Big E';
+  if (/levi'?s|\blevis\b|\blvc\b|\blevi\b/i.test(t)) return "Levi's";
+  return 'other';
+}
+
+function collectibleKind(title) {
+  if (/\b(psa|bgs|sgc|cgc|panini|topps|bowman|prizm|chrome|rookie card|trading card|\bcards?\b|slab|patch card)\b/i.test(title || '')) {
+    return 'card';
+  }
+  return 'memorabilia';
+}
+
+function watchTier(title) {
+  const t = title || '';
+  if (/nautilus|aquanaut|patek|richard mille|\brm\s*\d|royal oak|audemars|paul newman|perpetual|tourbillon|minute repeater|daytona|high complication/i.test(t)) {
+    return 'grail';
+  }
+  return 'trending';
+}
+
+function classifyFacets(title, category) {
+  const facets = {};
+  if (category === 'sneakers') facets.family = sneakerFamily(title);
+  if (category === 'streetwear') {
+    facets.apparel = streetwearApparel(title);
+    if (facets.apparel === 'denim') facets.denim_brand = denimBrand(title);
+  }
+  if (category === 'collectibles') facets.kind = collectibleKind(title);
+  if (category === 'watches') facets.tier = watchTier(title);
+  return facets;
+}
+
 function mapRow(row) {
   const category = String(row.category || '').toLowerCase();
   if (!WALLS.includes(category)) return null;
   const sale = Number(row.sale_price || row.price || 0);
   if (!sale) return null;
   const orig = Number(row.original_price || row.sold_avg || sale);
+  const classified = classifyFacets(row.title || '', category);
+  const family = row.family || classified.family || null;
+  const apparel = row.apparel || classified.apparel || null;
+  const denim_brand = apparel === 'denim' ? row.denim_brand || classified.denim_brand || null : null;
+  const kind = row.collectible_kind || row.kind || classified.kind || null;
+  const tier = row.watch_tier || row.tier || classified.tier || null;
+  const facets = {};
+  if (category === 'sneakers' && family) facets.family = family;
+  if (category === 'streetwear' && apparel) {
+    facets.apparel = apparel;
+    if (denim_brand) facets.denim_brand = denim_brand;
+  }
+  if (category === 'collectibles' && kind) facets.kind = kind;
+  if (category === 'watches' && tier) facets.tier = tier;
   return {
     title: row.title,
     category,
@@ -38,13 +121,35 @@ function mapRow(row) {
     image_url: row.image_url || '',
     source_platform: row.source_platform || 'ebay',
     currency: row.currency || 'USD',
-    cohort: row.cohort || null,
-    ebay_id: row.ebay_id || null
+    ebay_id: row.ebay_id || null,
+    family: category === 'sneakers' ? family : null,
+    apparel: category === 'streetwear' ? apparel : null,
+    denim_brand: category === 'streetwear' ? denim_brand : null,
+    kind: category === 'collectibles' ? kind : null,
+    tier: category === 'watches' ? tier : null,
+    facets
   };
 }
 
 async function fromInventory() {
-  const select = 'title,category,item_type,original_price,sale_price,discount_percent,affiliate_url,image_url,source_platform,currency,cohort,ebay_id';
+  const select = [
+    'title',
+    'category',
+    'item_type',
+    'original_price',
+    'sale_price',
+    'discount_percent',
+    'affiliate_url',
+    'image_url',
+    'source_platform',
+    'currency',
+    'ebay_id',
+    'family',
+    'apparel',
+    'denim_brand',
+    'collectible_kind',
+    'watch_tier'
+  ].join(',');
   const url = `${SUPABASE_URL}/rest/v1/inventory?is_active=eq.true&category=in.(${WALLS.join(',')})&select=${select}&order=sale_price.desc&limit=1000`;
   const res = await fetch(url, {
     headers: {
@@ -77,9 +182,7 @@ async function snapshot(req) {
   if (!res.ok) return null;
   const body = await res.json();
   if (!body.items || !body.items.length) return null;
-  body.items = body.items
-    .map((row) => mapRow(row))
-    .filter(Boolean);
+  body.items = body.items.map((row) => mapRow(row)).filter(Boolean);
   body.count = body.items.length;
   return body;
 }
