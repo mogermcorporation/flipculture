@@ -1,14 +1,41 @@
 const TOKEN_URL = 'https://api.ebay.com/identity/v1/oauth2/token';
 const SEARCH_URL = 'https://api.ebay.com/buy/browse/v1/item_summary/search';
 const CAMPAIGN_ID = process.env.EBAY_CAMPAIGN_ID || process.env.EBAY_PARTNER_ID || '5339168299';
+
 const QUERIES = [
-  ['Air Jordan 1 Retro High', 'sneakers'],
-  ['Nike Dunk Low', 'sneakers'],
-  ['HP Victus Gaming Laptop', 'tech'],
-  ['ASUS ROG Strix Laptop', 'tech'],
-  ['Rolex GMT-Master II', 'luxury'],
-  ['Rolex Submariner', 'luxury']
+  ['Air Jordan 1 Retro sneaker', 'sneakers', '15709', true],
+  ['Air Jordan 4 Retro sneaker', 'sneakers', '15709', true],
+  ['Air Jordan 11 Retro sneaker', 'sneakers', '15709', true],
+  ['Nike Kobe Bryant sneaker', 'sneakers', '15709', true],
+  ['Travis Scott Jordan sneaker', 'sneakers', '15709', true],
+  ['Nike Dunk Low', 'sneakers', '15709', true],
+  ['Supreme hoodie', 'streetwear', '1059', false],
+  ['Corteiz hoodie', 'streetwear', '1059', false],
+  ['True Religion jeans', 'streetwear', '1059', false],
+  ['Panini Prizm PSA 10', 'collectibles', '212', true],
+  ['Michael Jordan game used jersey relic', 'collectibles', '64482', false],
+  ['Rolex Submariner watch', 'watches', '31387', true],
+  ['Patek Philippe Nautilus watch', 'watches', '31387', true],
+  ['Omega Speedmaster watch', 'watches', '31387', true]
 ];
+
+const ELECTRONICS = /laptop|macbook|steam\s*deck|gpu\b|rtx\s*\d|rog\s*(strix|ally)|victus|battlestation|handheld|nintendo\s*switch/i;
+const SHOP_JACKET = /shop jacket/i;
+const WATCH_PARTS = /bracelet|bezel insert|caseback|clasp|coaster|\bpen\b|teardown|\blink\b/i;
+const SHOE = /sneaker|shoes?|jordan\s*\d|dunk|yeezy|kobe|air force/i;
+const APPAREL = /hoodie|sweatshirt|t-shirt|\btee\b|jeans|denim|jacket/i;
+const CARD = /psa|bgs|panini|topps|bowman|rookie card|game[- ]used|autograph|memorabilia|relic/i;
+const WATCH = /rolex|omega|cartier|tudor|patek|audemars|richard mille|submariner|datejust|daytona|speedmaster|watch/i;
+
+function classify(title, expected) {
+  const t = title || '';
+  if (ELECTRONICS.test(t) || SHOP_JACKET.test(t) || WATCH_PARTS.test(t)) return null;
+  if (WATCH.test(t) && !SHOE.test(t) && !APPAREL.test(t)) return 'watches';
+  if (CARD.test(t) && !SHOE.test(t)) return 'collectibles';
+  if (APPAREL.test(t) && !SHOE.test(t)) return 'streetwear';
+  if (SHOE.test(t)) return 'sneakers';
+  return expected;
+}
 
 function affiliateUrl(raw) {
   if (!raw) return '';
@@ -57,11 +84,15 @@ async function ebayToken() {
   return body.access_token;
 }
 
-async function search(token, query, category) {
+async function search(token, query, expected, categoryId, authenticity) {
   const url = new URL(SEARCH_URL);
   url.searchParams.set('q', query);
-  url.searchParams.set('limit', '8');
-  url.searchParams.set('filter', 'buyingOptions:{FIXED_PRICE}');
+  url.searchParams.set('limit', '12');
+  const filt = authenticity
+    ? 'qualifiedPrograms:{AUTHENTICITY_GUARANTEE},buyingOptions:{FIXED_PRICE}'
+    : 'buyingOptions:{FIXED_PRICE}';
+  url.searchParams.set('filter', filt);
+  if (categoryId) url.searchParams.set('category_ids', categoryId);
   const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -74,8 +105,11 @@ async function search(token, query, category) {
   for (const item of body.itemSummaries || []) {
     const salePrice = Number(item.price?.value || 0);
     if (!salePrice) continue;
+    const title = item.title || query;
+    const category = classify(title, expected);
+    if (category !== expected) continue;
     out.push({
-      title: item.title || query,
+      title,
       category,
       item_type: 'physical',
       original_price: Math.round(salePrice * 120) / 100,
@@ -98,10 +132,9 @@ async function snapshot(req) {
   if (!res.ok) return null;
   const body = await res.json();
   if (!body.items || !body.items.length) return null;
-  body.items = body.items.map((row) => ({
-    ...row,
-    affiliate_url: affiliateUrl(row.affiliate_url)
-  }));
+  body.items = body.items
+    .map((row) => ({ ...row, affiliate_url: affiliateUrl(row.affiliate_url) }))
+    .filter((row) => ['sneakers', 'streetwear', 'collectibles', 'watches'].includes(row.category));
   return body;
 }
 
@@ -116,8 +149,8 @@ module.exports = async (req, res) => {
     const token = await ebayToken();
     const items = [];
     const seen = new Set();
-    for (const [query, category] of QUERIES) {
-      const batch = await search(token, query, category);
+    for (const [query, category, categoryId, authenticity] of QUERIES) {
+      const batch = await search(token, query, category, categoryId, authenticity);
       for (const row of batch) {
         const key = row.affiliate_url || row.title;
         if (seen.has(key)) continue;
